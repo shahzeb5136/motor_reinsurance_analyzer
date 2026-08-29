@@ -216,10 +216,26 @@ def _css() -> str:
 }
 html, body, [class*="css"] { font-family: __FONT_SANS__; letter-spacing:.1px; }
 
-.block-container { padding-top: 1.1rem; padding-bottom: 3.5rem; max-width: 1580px; }
+.block-container { padding-top: 2.4rem; padding-bottom: 3.5rem; max-width: 1580px; }
 #MainMenu, footer { visibility: hidden; }
 [data-testid="stDecoration"] { display:none; }
-[data-testid="stToolbar"] { right: 1rem; }
+
+/* Streamlit's own header is an opaque fixed bar that sits on top of the first
+   rows of the page. Left alone it clips the masthead. Collapse it to nothing
+   and keep only the toolbar floating above the content. */
+header[data-testid="stHeader"] {
+  background: transparent !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  z-index: 90;
+}
+header[data-testid="stHeader"]::before,
+header[data-testid="stHeader"]::after { display: none !important; }
+[data-testid="stToolbar"] { right: .75rem; top: .35rem; z-index: 95; }
+[data-testid="stStatusWidget"] { z-index: 95; }
+/* the sidebar collapse control must stay clickable above the masthead */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"] { top: .5rem; z-index: 95; }
 
 h1,h2,h3,h4,h5 { font-family:__FONT_HEAD__ !important; color:__TEXT__ !important;
   letter-spacing:-.2px; font-weight:600; }
@@ -240,7 +256,7 @@ hr { border-color:__LINE__ !important; margin:.9rem 0 !important; }
 
 /* ---------- masthead ---------- */
 .rp-head { display:flex; align-items:center; gap:16px; padding:10px 18px 12px;
-  border-bottom:1px solid __LINE__; margin:-4px 0 18px;
+  border-bottom:1px solid __LINE__; margin:0 0 18px;
   background:linear-gradient(90deg, rgba(232,163,61,.055), rgba(232,163,61,0) 55%); }
 .rp-mark { font-family:__FONT_HEAD__; font-weight:700; font-size:22px; letter-spacing:.5px;
   color:__TEXT__; line-height:1; white-space:nowrap; }
