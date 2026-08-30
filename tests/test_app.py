@@ -265,6 +265,26 @@ def test_pages_render_for_a_never_attaching_layer():
         assert not at.exception, f"{page}: {[e.value for e in at.exception]}"
 
 
+def test_severity_page_handles_every_tail_setting():
+    """The large-loss section is skipped when there is no tail, and must cope
+    with an infinite-mean tail and an unreachable attachment."""
+    cases = [
+        ("no tail", {"p_extreme": 0.0}),
+        ("infinite mean", {"ext_alpha": 0.9}),
+        ("burr body", {"sev_family": "Burr"}),
+        ("pareto body", {"sev_family": "Pareto"}),
+        ("wide tail share", {"p_extreme": 5.0}),
+        ("unreachable attachment", {"attachment": 5_000_000_000.0}),
+    ]
+    for label, overrides in cases:
+        at = _harness("distributions")
+        at.run()
+        for key, value in overrides.items():
+            at.session_state[key] = value
+        at.run()
+        assert not at.exception, f"{label}: {[e.value for e in at.exception]}"
+
+
 def test_widget_defaults_survive_a_page_switch():
     """Streamlit only pushes a session value to a widget when the key was
     assigned in the same run, so a plain setdefault leaves widgets on a later

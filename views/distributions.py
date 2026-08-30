@@ -7,7 +7,8 @@ import streamlit as st
 
 from repricer import charts, components as C, state as S
 from repricer.distributions import SEVERITY_FAMILIES
-from repricer.theme import num, pct, usd, usd_short
+from repricer import theme as T
+from repricer.theme import mult, num, pct, usd, usd_short
 
 
 def render() -> None:
@@ -190,6 +191,11 @@ def render() -> None:
             ]
         C.ledger(rows)
 
+    # ------------------------------------------- the two populations, apart
+    if ext is not None and S.extreme_share() > 0:
+        _population_split(body_model=S.current_body(), ext=ext,
+                          p=S.extreme_share(), freq=freq, layer=layer)
+
     # ------------------------------------------------------------ warnings
     warns = [w for w in S.model_warnings() if "attachment" in w[1] or "alpha" in w[1]
              or "modelled average" in w[1]]
@@ -198,9 +204,132 @@ def render() -> None:
         C.flags(warns)
 
     # ------------------------------------------------------- executive band
-    if ext is not None and float(st.session_state["p_extreme"]) > 0:
-        p_ext = S.extreme_share()
-        share_of_mean = (p_ext * ext.mean / sev.mean) if math.isfinite(ext.mean) and sev.mean else float("nan")
+    _exec_band_populations(sev, ext, layer, expected_pierce)
+
+
+def _population_split(body_model, ext, p: float, freq, layer) -> None:
+    """The two claim populations shown apart, at their own scales.
+
+    On the blended chart the large-loss component is drawn scaled by its
+    mixing weight, which at a share of a percent flattens it into the axis -
+    exactly the claims that decide the price become the hardest to see. Here
+    each population gets its own panel, and the counts are stated outright.
+    """
+    import pandas as pd
+
+    C.gap()
+    C.section("The two populations, side by side")
+    C.note(
+        "On the blended chart above, the large-loss curve is scaled by its "
+        f"<b>{pct(p, 2)}</b> share, which flattens it against the attritional body. "
+        "Below, each population is drawn on its own scale — the shape and the "
+        "position relative to the layer are what matter, not the relative height."
+    )
+
+    per_year = freq.mean * p
+    reach = freq.mean * p * float(ext.sf(layer.attachment))
+    full = freq.mean * p * float(ext.sf(layer.top))
+    attritional = freq.mean * (1.0 - p)
+
+    C.gap(small=True)
+    C.kpi_row([
+        dict(label="Large-loss claims a year", value=f"{per_year:,.1f}", tone="danger",
+             sub=f"out of {freq.mean:,.0f} claims in total"),
+        dict(label="Of those, reaching the layer",
+             value=f"{reach:.2f}" if reach >= 0.01 else f"1 in {1 / max(reach, 1e-12):,.0f} yrs",
+             tone="accent",
+             sub=f"{pct(float(ext.sf(layer.attachment)))} of large losses exceed "
+                 f"{usd_short(layer.attachment)}"),
+        dict(label="Median large loss", value=usd_short(ext.median()), tone="",
+             sub=f"vs {usd_short(body_model.median())} for an ordinary claim"),
+        dict(label="Mean large loss",
+             value="undefined" if math.isinf(ext.mean) else usd_short(ext.mean),
+             tone="danger" if math.isinf(ext.mean) else "teal",
+             sub="alpha ≤ 1: no finite mean" if math.isinf(ext.mean)
+                 else f"{mult(ext.mean / body_model.mean)} an ordinary claim"),
+    ])
+
+    C.gap(small=True)
+    a, b = st.columns([1, 1], gap="large")
+    with a:
+        C.chart(charts.component_density(
+            body_model, T.RETAIN if hasattr(T, "RETAIN") else "#3E4C5E",
+            "Attritional body", attachment=layer.attachment, top=layer.top,
+            subtitle=f"Attritional body — {pct(1 - p, 2)} of claims"), key="dens_body")
+        C.note(
+            f"Ordinary motor claims. The whole distribution sits far below the "
+            f"{usd_short(layer.attachment)} attachment, which is why it is invisible "
+            f"on the layer's economics."
+        )
+    with b:
+        C.chart(charts.component_density(
+            ext, T.DANGER, "Large-loss population",
+            attachment=layer.attachment, top=layer.top,
+            subtitle=f"Large-loss population — {pct(p, 2)} of claims"), key="dens_ext")
+        C.note(
+            "The same axis scale convention, but this population's own range. The "
+            "shaded band is the layer: the share of this curve lying inside it is "
+            "what the contract actually pays for."
+        )
+
+    C.gap(small=True)
+    a, b = st.columns([1, 1.15], gap="large")
+    with a:
+        C.section("How many claims get through")
+        C.chart(charts.claim_funnel([
+            ("All claims", attritional + per_year, T.XS_BAND,
+             f"{freq.mean:,.0f} claims a year across the whole book"),
+            ("Large-loss claims", per_year, T.DANGER,
+             f"{pct(p, 2)} of claims, drawn from the heavy-tailed population"),
+            (f"Reach {usd_short(layer.attachment)}", reach, T.ACCENT,
+             "large losses big enough to breach the attachment"),
+            (f"Exceed {usd_short(layer.top)}", full, T.TEAL,
+             "large enough to consume a full limit on their own"),
+        ]), key="funnel")
+        C.note(
+            "Logarithmic axis — the counts fall by orders of magnitude at each step. "
+            "The bottom two bars are the entire economic content of this contract."
+        )
+    with b:
+        C.section("What a large loss costs the layer")
+        st.dataframe(_cession_table(ext, layer), use_container_width=True,
+                     hide_index=True, height=300)
+        C.note(
+            "Percentiles of the large-loss population, and what the layer would pay "
+            "on a claim of that size. Everything below the attachment cedes nothing; "
+            "everything above the exhaustion point cedes the same full limit, so the "
+            "layer stops caring how much worse it gets."
+        )
+
+
+def _cession_table(ext, layer):
+    import pandas as pd
+
+    rows = []
+    for q in (0.5, 0.75, 0.9, 0.95, 0.99, 0.999, 0.9999):
+        size = float(ext.quantile(q))
+        ceded = min(max(size - layer.attachment, 0.0), layer.limit)
+        rows.append({
+            "Percentile": f"{q * 100:g}th",
+            "1 large loss in": f"{1 / (1 - q):,.0f}",
+            "Claim size": usd_short(size),
+            "Ceded to layer": usd_short(ceded),
+            "Retained": usd_short(size - ceded),
+        })
+    return pd.DataFrame(rows)
+
+
+def _exec_band_populations(sev, ext, layer, expected_pierce: float) -> None:
+    p_ext = S.extreme_share()
+    if ext is not None and p_ext > 0:
+        share_of_mean = ((p_ext * ext.mean / sev.mean)
+                         if math.isfinite(ext.mean) and sev.mean else float("nan"))
+        if expected_pierce <= 0:
+            cadence = " - which is to say, never, on these assumptions"
+        elif expected_pierce < 1:
+            cadence = f" - roughly one every {1 / expected_pierce:,.1f} years"
+        else:
+            cadence = " - so a typical year sees more than one"
         tail_sentence = (
             f"Those {pct(p_ext, 2)} of claims account for roughly "
             f"<b>{pct(share_of_mean)}</b> of the book's total claims cost, and for "
@@ -209,13 +338,6 @@ def render() -> None:
             "The large-loss population has no finite mean, so it dominates the "
             "book's cost without bound."
         )
-        if expected_pierce <= 0:
-            cadence = " — which is to say, never, on these assumptions"
-        elif expected_pierce < 1:
-            cadence = f" — roughly one every {1 / expected_pierce:,.1f} years"
-        else:
-            cadence = " — so a typical year sees more than one"
-
         C.exec_band([
             f"The model splits claims into two populations. "
             f"<b>{pct(1 - p_ext, 2)}</b> are ordinary claims averaging "

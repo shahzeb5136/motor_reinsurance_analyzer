@@ -187,6 +187,130 @@ def severity_chart(sev: Severity, attachment: float, top: float,
     return fig
 
 
+def _log_density(model: Severity, grid: np.ndarray) -> np.ndarray:
+    """Density with respect to log x, i.e. x·f(x).
+
+    Differencing the exact CDF avoids needing a closed-form pdf for every
+    family, and working in log space is what makes a distribution spanning
+    four orders of magnitude readable at all.
+    """
+    cdf = np.asarray(model.cdf(grid), dtype=float)
+    return np.clip(np.gradient(cdf, np.log(grid)), 0, None)
+
+
+def component_density(model: Severity, colour: str, name: str,
+                      attachment: float | None = None, top: float | None = None,
+                      height: int = 300, subtitle: str = "") -> go.Figure:
+    """One severity population plotted on its own scale.
+
+    The blended chart necessarily shows the large-loss component scaled by its
+    mixing weight, which for a share of a percent or so flattens it into the
+    axis. Here it gets the full height of the panel, so its shape and its
+    position relative to the layer are actually legible.
+    """
+    lo = max(float(model.quantile(0.002)), 1.0)
+    hi = max(float(model.quantile(0.9995)), (top or 0.0) * 1.25, lo * 10)
+    grid = np.geomspace(lo, hi, 600)
+    dens = _log_density(model, grid)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=grid, y=dens, mode="lines", fill="tozeroy",
+        line=dict(color=colour, width=2.2),
+        fillcolor=_rgba(colour, 0.16), name=name,
+        hovertemplate="claim %{x:$,.0f}<extra></extra>",
+    ))
+
+    if attachment is not None and top is not None and top > attachment:
+        fig.add_vrect(x0=attachment, x1=top, fillcolor="rgba(232,163,61,.10)",
+                      line_width=0, layer="below")
+        for value, label, mark in ((attachment, "attachment", T.DANGER),
+                                   (top, "exhaustion", T.MUTED)):
+            if value < lo or value > hi:
+                continue
+            fig.add_vline(x=value, line=dict(color=mark, width=1.3, dash="dash"))
+            fig.add_annotation(
+                x=math.log10(max(value, 1.0)), y=1, yref="paper", yanchor="top",
+                text=f"{label}<br><b>{T.usd_short(value)}</b>", showarrow=False,
+                font=dict(family=T.FONT_MONO, size=10, color=mark),
+                bgcolor="rgba(11,14,19,.78)", borderpad=3,
+            )
+
+    median = float(model.quantile(0.5))
+    if lo <= median <= hi:
+        fig.add_vline(x=median, line=dict(color=colour, width=1, dash="dot"))
+        fig.add_annotation(
+            x=math.log10(max(median, 1.0)), y=0.04, yref="paper", yanchor="bottom",
+            text=f"median {T.usd_short(median)}", showarrow=False,
+            font=dict(family=T.FONT_MONO, size=9.5, color=colour),
+            bgcolor="rgba(11,14,19,.7)", borderpad=2,
+        )
+
+    fig.update_layout(
+        height=height, showlegend=False, margin=dict(l=10, r=16, t=50, b=36),
+        title=dict(text=subtitle or name,
+                   font=dict(family=T.FONT_MONO, size=11.5, color=T.MUTED)),
+    )
+    fig.update_xaxes(type="log", title="Claim size (log scale)",
+                     tickprefix=T._cur(), tickformat="~s")
+    fig.update_yaxes(title="relative frequency", showticklabels=False)
+    return fig
+
+
+def _rgba(hex_colour: str, alpha: float) -> str:
+    h = hex_colour.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def claim_funnel(stages: list[tuple[str, float, str, str]],
+                 height: int = 300) -> go.Figure:
+    """How a year's claims narrow down to the ones the layer actually pays.
+
+    Counts fall across several orders of magnitude, so the axis is
+    logarithmic; the annotation on each bar carries the real number.
+    """
+    labels = [s[0] for s in stages]
+    values = [max(s[1], 1e-9) for s in stages]
+    colours = [s[2] for s in stages]
+    notes = [s[3] for s in stages]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=labels[::-1], x=values[::-1], orientation="h",
+        marker=dict(color=colours[::-1], line=dict(color=T.INK, width=1)),
+        text=[_count_label(v) for v in values[::-1]],
+        textposition="outside",
+        textfont=dict(family=T.FONT_MONO, size=11.5, color=T.TEXT),
+        cliponaxis=False,          # keep the top bar's label off the axis edge
+        customdata=notes[::-1],
+        hovertemplate="<b>%{y}</b><br>%{customdata}<extra></extra>",
+    ))
+    fig.update_layout(height=height, showlegend=False,
+                      margin=dict(l=10, r=96, t=42, b=38), bargap=0.32)
+
+    # Leave a decade of headroom to the right so the outside labels have
+    # somewhere to sit, and a floor below the smallest bar so it stays visible.
+    lo = max(min(values), 1e-4)
+    hi = max(values)
+    fig.update_xaxes(type="log", title="Claims per year (log scale)",
+                     range=[math.log10(lo) - 0.6, math.log10(hi) + 0.9])
+    fig.update_yaxes(tickfont=dict(size=11, color=T.TEXT_DIM))
+    return fig
+
+
+def _count_label(v: float) -> str:
+    if v >= 100:
+        return f"  {v:,.0f}"
+    if v >= 1:
+        return f"  {v:,.1f}"
+    if v >= 0.01:
+        return f"  {v:.2f}  (1 in {1 / v:,.0f} yrs)"
+    if v > 0:
+        return f"  1 in {1 / v:,.0f} yrs"
+    return "  never"
+
+
 def exceedance_by_claim(sev: Severity, attachment: float, top: float,
                         height: int = 280) -> go.Figure:
     """P(a single claim exceeds x) - the curve that decides whether a layer
