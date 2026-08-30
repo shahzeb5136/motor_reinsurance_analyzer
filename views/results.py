@@ -48,11 +48,7 @@ def render() -> None:
     with a:
         C.section("Distribution of the annual loss")
         C.chart(charts.loss_histogram(res), key="hist")
-        C.note(
-            "Only years in which the layer paid something are plotted; the clean "
-            "years would otherwise be a single bar swamping everything else. The "
-            "dashed lines mark the average and the two tail return periods."
-        )
+        C.note(_histogram_note(res))
     with b:
         C.section("Exceedance probability")
         C.chart(charts.ep_curve(res), key="ep")
@@ -132,6 +128,36 @@ def render() -> None:
     # -------------------------------------------------------- exec summary
     C.gap()
     _exec_band(res)
+
+
+def _histogram_note(res) -> str:
+    """Explain the two features of this chart people reliably misread: the
+    pile-up exactly on one limit, and the years sitting beyond it."""
+    layer = res.layer
+    limit, cap = layer.limit, layer.aggregate_cap
+    at_limit = float((np.isclose(res.layer_loss, limit, atol=1.0)).mean())
+    beyond = float((res.layer_loss > limit + 1.0).mean())
+
+    note = (
+        "Each bar is one simulated <b>year</b>, totalled across every claim in it. "
+        "Only years in which the layer paid are plotted; the clean years would "
+        "otherwise be a single bar swamping everything else."
+    )
+    if at_limit > 0.0005:
+        note += (
+            f" The spike on <b>{usd_short(limit)}</b> is the per-occurrence limit "
+            f"biting: every claim above {usd_short(layer.top)} cedes exactly one "
+            f"full limit and no more, however large it is, so the whole upper tail "
+            f"of claim sizes lands on that one value ({pct(at_limit)} of years)."
+        )
+    if beyond > 0.0005 and math.isfinite(cap):
+        note += (
+            f" Years further right had <b>two or more</b> qualifying claims — the "
+            f"limit is per claim, not per year, and the reinstatements let it be "
+            f"restored and used again up to the {usd_short(cap)} annual cap "
+            f"({pct(beyond)} of years)."
+        )
+    return note
 
 
 def _stale_banner() -> None:

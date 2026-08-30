@@ -365,6 +365,27 @@ def loss_histogram(result: SimResult, height: int = 320,
         hovertemplate="%{x:$,.0f}<br>%{y:,} years<extra></extra>",
     ))
 
+    # Structural reference lines. The mass sitting exactly on one full limit,
+    # and the years reaching past it, are the two things readers most often
+    # misread - a per-occurrence limit does not cap the year, because the
+    # reinstatements let the layer respond again to a second large claim.
+    layer = result.layer
+    limit, cap = layer.limit, layer.aggregate_cap
+    hi = float(nz.max())
+    structure = [(limit, "one full limit")]
+    if math.isfinite(cap) and cap > limit * 1.001:
+        structure.append((cap, "annual cap"))
+    for value, label in structure:
+        if value <= 0 or value > hi * 1.08:
+            continue
+        fig.add_vline(x=value, line=dict(color=T.XS_BAND, width=1.2, dash="dot"))
+        fig.add_annotation(
+            x=value, y=0.02, yref="paper", yanchor="bottom",
+            text=f"{label}<br><b>{T.usd_short(value)}</b>", showarrow=False,
+            font=dict(family=T.FONT_MONO, size=9.5, color=T.XS_BAND),
+            bgcolor="rgba(11,14,19,.82)", borderpad=3,
+        )
+
     if markers:
         marks = [
             (result.burning_cost, "expected", T.TEAL),
@@ -382,14 +403,18 @@ def loss_histogram(result: SimResult, height: int = 320,
                 bgcolor="rgba(11,14,19,.78)", borderpad=3,
             )
 
-    zero_share = 1.0 - result.p_pay
+    multi = float((result.n_pierce >= 2).mean())
+    caption = (f"{T.pct(result.p_pay)} of years produce a loss to the layer"
+               f"  ·  {T.pct(1.0 - result.p_pay)} are clean")
+    if multi > 0.0005:
+        caption += f"  ·  {T.pct(multi)} see two or more qualifying claims"
+
     fig.update_layout(
         height=height, showlegend=False, margin=dict(l=10, r=16, t=54, b=36),
-        title=dict(text=f"{T.pct(result.p_pay)} of years produce a loss to the layer"
-                        f"  ·  {T.pct(zero_share)} are clean",
+        title=dict(text=caption,
                    font=dict(family=T.FONT_MONO, size=11.5, color=T.MUTED)),
     )
-    _money_axis(fig, "x", "Annual loss to the layer")
+    _money_axis(fig, "x", "Total loss to the layer across the whole year")
     fig.update_yaxes(title="simulated years")
     return fig
 
