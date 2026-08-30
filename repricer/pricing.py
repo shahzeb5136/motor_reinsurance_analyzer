@@ -223,7 +223,7 @@ def premium_build_up(quote: Quote) -> list[tuple[str, float, str]]:
     {"start", "add", "sub", "total"}.
     """
     steps = [
-        ("Expected layer loss", quote.expected_loss, "start"),
+        ("Expected annual layer loss", quote.expected_loss, "start"),
         ("Capital charge", quote.capital_charge, "add"),
         ("Internal expense", quote.expense, "add"),
         ("Brokerage / commission", quote.brokerage, "add"),
@@ -248,7 +248,7 @@ def alternative_prices(result: SimResult, loadings: Loadings) -> dict[str, float
     lc = result.burning_cost
     sd = result.volatility
     return {
-        "Expected loss (burning cost)": lc,
+        "Expected annual loss (burning cost)": lc,
         "Standard deviation principle (EL + 0.25 sd)": lc + 0.25 * sd,
         "Variance principle": lc + (0.5 * sd * sd / max(result.tvar(0.995), 1.0)),
         "TVaR 99% principle": 0.85 * lc + 0.15 * result.tvar(0.99),

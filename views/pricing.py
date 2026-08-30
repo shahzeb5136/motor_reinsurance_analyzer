@@ -36,7 +36,7 @@ def render() -> None:
     # ------------------------------------------------------------- headline
     C.kpi_row([
         dict(label="Technical premium (100%)", value=usd_short(quote.technical_premium),
-             tone="accent", sub="the floor below which the deal destroys value"),
+             tone="accent", sub="per year, before market adjustment"),
         dict(label="Rate on line", value=pct(quote.rate_on_line),
              tone="", sub=f"loss on line {pct(quote.loss_on_line)}"),
         dict(label="Expected loss ratio", value=pct(quote.expected_loss_ratio),
@@ -100,11 +100,20 @@ def render() -> None:
         C.section("Premium build-up")
         C.chart(charts.premium_waterfall(premium_build_up(quote)), key="pwf")
         C.note(
-            "Expected loss, plus the cost of the capital held against a bad year, "
-            "plus expenses and brokerage, less the reinstatement premium the "
-            "contract earns back when losses restore the limit. Reinstatement income "
-            "reduces the deposit premium because it is income the reinsurer expects "
-            "to collect."
+            f"Every figure here is <b>per year</b>, not per claim. The expected annual "
+            f"loss of {usd_short(quote.expected_loss)} is what the layer costs in an "
+            f"average year across all "
+            f"{float(st.session_state['n_claims']):,.0f} claims — roughly "
+            f"{res.expected_claims_to_layer:.2f} of them reach the layer in a year, at "
+            f"about {usd_short(res.burning_cost / res.expected_claims_to_layer)} each "
+            f"when they do. Added to it: the cost of capital held against a bad year, "
+            f"expenses and brokerage; less the reinstatement premium the contract earns "
+            f"back when losses restore the limit, which is income the reinsurer expects "
+            f"to collect."
+            if res.expected_claims_to_layer > 0 else
+            "Expected loss, plus the cost of the capital held against a bad year, plus "
+            "expenses and brokerage, less the reinstatement premium the contract earns "
+            "back when losses restore the limit."
         )
 
     # ---------------------------------------------------------- diagnostics
